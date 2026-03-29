@@ -25,7 +25,7 @@ spec:
                 seccompProfile:
                     type: RuntimeDefault
             imagePullSecrets:
-                - name: ghcr-pull-secret
+                - name: ghcr-secret
             containers:
                 - name: iren
                   image: ghcr.io/andrew-devcoder/iren:first
