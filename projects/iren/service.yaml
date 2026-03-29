@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: iren
+  namespace: iren
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: iren
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
