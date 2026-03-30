@@ -29,6 +29,9 @@ spec:
                 - name: iren
                   image: ghcr.io/andrew-devcoder/iren:first
                   imagePullPolicy: IfNotPresent
+                  envFrom:
+                      - secretRef:
+                            name: iren-env
                   ports:
                       - containerPort: 3000
                         name: http
