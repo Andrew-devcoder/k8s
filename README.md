@@ -6,7 +6,7 @@
 
 - кожен новий сайт або API = окремий каталог у `projects/`
 - у ньому лежать `Namespace`, `Deployment`, `Service`
-- окремо є один `Ingress`, який вирішує, який хост іде в який сервіс
+- кожен проект може мати свій `Ingress`, який вирішує, який хост іде в який сервіс
 
 `apps/frontend` і `apps/backend` були моїм неправильним припущенням про структуру. Я це прибрав.
 
@@ -21,6 +21,7 @@ projects/
   b2b/
   iren/
 infra/
+  cert-manager/
   ingress/
 clusters/
   production/
@@ -47,34 +48,75 @@ clusters/
 - `projects/b2b` -> `b2b.andrii-kovpak.dev`
 - `projects/iren` -> `iren.andrii-kovpak.dev`
 
-## Один ingress на все
+## SSL і сабдомени
 
-Ваш задум правильний: DNS ви не чіпаєте тут, а контролюєте тільки `Ingress rules`.
+У repo додана базова схема для автоматичного SSL:
 
-Для цього є:
+- `cert-manager` випускає і продовжує сертифікати Let's Encrypt
+- `ClusterIssuer` лежить у [infra/cert-manager/clusterissuer-letsencrypt-prod.yaml](/Users/admin/Projects/k8s/infra/cert-manager/clusterissuer-letsencrypt-prod.yaml)
+- для безпечної перевірки є ще [infra/cert-manager/clusterissuer-letsencrypt-staging.yaml](/Users/admin/Projects/k8s/infra/cert-manager/clusterissuer-letsencrypt-staging.yaml)
+- проект `iren` має свій `Ingress` у [projects/iren/ingress.yaml](/Users/admin/Projects/k8s/projects/iren/ingress.yaml)
 
-- [infra/ingress/namespace.yaml](/Users/admin/Projects/k8s/infra/ingress/namespace.yaml)
+Для `iren.andrii-kovpak.dev` сертифікат буде окремим. Це нормально і саме так зазвичай робиться для сабдоменів.
 
-Технічний нюанс Kubernetes:
+Сертифікат на `andrii-kovpak.dev` не покриває `iren.andrii-kovpak.dev`, якщо це не wildcard сертифікат `*.andrii-kovpak.dev`.
 
-`Ingress` не може напряму ходити в `Service` іншого namespace.
+## DNS
 
-Тому схема тут така:
+На вашому скріні проблема правильна: `A`-запис не може вказувати на `*.andrii-kovpak.dev`.
 
-1. Є namespace `edge`.
-2. У `edge` живе один `Ingress`.
-3. Там же є bridge services.
-4. Вони перенаправляють на сервіси конкретних проектів у їхніх namespace.
+Правильно так:
 
-Конкретні manifests для `Ingress` і bridge services краще додавати тільки тоді, коли проект уже готовий до зовнішнього доступу.
+- `A` запис: ім'я `@`, значення `IP` вашого ingress/load balancer
+- `A` запис: ім'я `*`, значення `IP` вашого ingress/load balancer
+- або `CNAME` запис: ім'я `*`, значення `andrii-kovpak.dev` чи hostname балансера, якщо ваш DNS-провайдер це підтримує
+
+Тобто wildcard DNS можна зробити, але:
+
+- для `A` запису значенням має бути саме IPv4 адреса
+- для `CNAME` значенням має бути доменне ім'я
+
+Приклад:
+
+```text
+Type: A
+Name: @
+Value: 203.0.113.10
+
+Type: A
+Name: *
+Value: 203.0.113.10
+```
 
 ## Як додавати новий проект
 
 1. Створюєте каталог `projects/<project-name>/`
-2. Додаєте `namespace.yaml`, `deployment.yaml`, `service.yaml`, `kustomization.yaml`
-3. Коли проект готовий до зовнішнього доступу, додаєте bridge service в `infra/ingress/`
-4. Додаєте host rule для потрібного домену або сабдомену в `infra/ingress/`
+2. Додаєте `namespace.yaml`, `deployment.yaml`, `service.yaml`, `ingress.yaml`, `kustomization.yaml`
+3. У `ingress.yaml` ставите потрібний `host` і `tls.secretName`
+4. DNS для цього хоста має вказувати на ingress/load balancer
 5. Додаєте project у [clusters/production/kustomization.yaml](/Users/admin/Projects/k8s/clusters/production/kustomization.yaml)
+
+Мінімальний приклад:
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - app.example.com
+      secretName: app-example-com-tls
+  rules:
+    - host: app.example.com
+```
+
+Після цього `cert-manager` сам створить і буде поновлювати сертифікат.
+
+Спочатку зручно тестувати нові хости через `letsencrypt-staging`, а після успішної перевірки міняти анотацію на `letsencrypt-prod`.
 
 ## GHCR простими словами
 
@@ -148,12 +190,21 @@ kubectl create secret docker-registry ghcr-pull-secret \
 kubectl apply -k clusters/production
 ```
 
-Ingress:
+TLS і проекти:
 
 ```bash
-kubectl apply -f infra/ingress/namespace.yaml
-kubectl apply -f infra/ingress/<service-bridges>.yaml
-kubectl apply -f infra/ingress/<ingress>.yaml
+kubectl apply -k infra/cert-manager
+kubectl apply -k clusters/production
+```
+
+Перевірка:
+
+```bash
+kubectl get ingress -A
+kubectl get clusterissuer
+kubectl get certificate -A
+kubectl describe ingress iren -n iren
+kubectl describe certificate iren-andrii-kovpak-dev-tls -n iren
 ```
 
 ## Rollback

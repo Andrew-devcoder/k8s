@@ -1,0 +1,24 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: iren
+  namespace: iren
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - iren.andrii-kovpak.dev
+      secretName: iren-andrii-kovpak-dev-tls
+  rules:
+    - host: iren.andrii-kovpak.dev
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: iren
+                port:
+                  name: http
